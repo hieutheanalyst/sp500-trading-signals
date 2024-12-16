@@ -1,0 +1,121 @@
+// Supertrend Function
+function SuperTrend(lenATR, width)
+{
+    nATR = ATR(lenATR);
+    pAvg = (H + L) / 2;
+
+    upperBand = pAvg + width * nATR;
+    lowerBand = pAvg - width * nATR;
+    isUpTrend = True;
+
+    for (i = lenATR; i < BarCount; ++i)
+    {
+        if (H[i] > upperBand[i-1])
+            isUpTrend[i] = True;
+        else if (L[i] < lowerBand[i-1])
+            isUpTrend[i] = False;
+        else
+            isUpTrend[i] = isUpTrend[i-1];
+
+        if (isUpTrend[i])
+            lowerBand[i] = Max(lowerBand[i], lowerBand[i-1]);
+        else
+            upperBand[i] = Min(upperBand[i], upperBand[i-1]);
+    }
+
+    super = IIf(isUpTrend, lowerBand, upperBand);
+    return super;
+}
+
+// Parameters
+lenATR = Param("ATR Period", 14);
+width = Param("Supertrend Multiplier", 3);
+RSI_Period = Param("RSI Period", 2);
+ATR_Multiplier = Param("ATR Multiplier", 1.5); // ATR multiple for stop loss
+RiskRewardRatio = 1.5; // 1:1.5 risk-to-reward ratio
+
+// Calculate indicators
+SuperTrendLine = SuperTrend(lenATR, width);
+RSIVal = RSI(RSI_Period);
+ATRVal = ATR(lenATR);
+
+// Entry Signal (Buy)
+Buy = RSIVal < 12 AND Close > SuperTrendLine;
+Sell = False;
+
+// Initialize variables
+EntryPrice = Null;
+StopLoss = Null;
+TakeProfit = Null;
+Risk = Null;
+isInPosition = False;
+
+// Loop through bars to maintain values from Buy to Sell signal
+for (i = 1; i < BarCount; i++)
+{
+    if (isInPosition[i-1] == False AND Buy[i])
+    {
+        isInPosition[i] = True;  // Set to true when a Buy signal occurs
+        EntryPrice[i] = Close[i];  // Capture the EntryPrice at Buy signal
+        SwingLow = Low[i];  // Recent swing low at Buy signal
+        StopLoss[i] = SwingLow - ATR_Multiplier * ATRVal[i];  // Stop Loss at Buy signal
+        Risk[i] = EntryPrice[i] - StopLoss[i];  // Calculate Risk
+        TakeProfit[i] = EntryPrice[i] + Risk[i] * RiskRewardRatio;  // Take Profit at Buy signal
+    }
+    else if (isInPosition[i-1] == True AND (Low[i] > Stoploss[i-1] AND High[i] < TakeProfit[i-1]))  // While in position and no Sell signal, maintain values
+    {
+        EntryPrice[i] = EntryPrice[i-1];
+        StopLoss[i] = StopLoss[i-1];
+        TakeProfit[i] = TakeProfit[i-1];
+        isInPosition[i] = isInPosition[i-1];
+        Sell[i] = False;
+    }
+    
+    // When Sell occurs, reset everything
+    if ((Low[i] <= Stoploss[i-1] OR High[i] >= TakeProfit[i-1]) AND isInPosition[i-1])
+    {
+        isInPosition[i] = False;  // Reset position status
+        EntryPrice[i] = Null;
+        StopLoss[i] = Null;
+        TakeProfit[i] = Null;
+        Sell[i] = True;
+    }
+}
+
+
+// Remove excess signals using ExRem
+Buy = ExRem(Buy, Sell);
+Sell = ExRem(Sell, Buy);
+
+// Plotting the strategy on the chart
+Plot(Close, "Price", colorDefault, styleCandle);
+Plot(SuperTrendLine, "SuperTrend", colorGreen, styleThick);
+
+// Plot entry price, stop loss, and take profit lines only when in a Buy order
+Plot(EntryPrice, "Entry Price", colorYellow, styleLine | styleDots);
+Plot(StopLoss, "Stop Loss", colorRed, styleLine | styleDashed);
+Plot(TakeProfit, "Take Profit", colorGreen, styleLine | styleDashed);
+
+// Apply stop loss and take profit
+ApplyStop(stopTypeLoss, stopModePoint, EntryPrice - StopLoss, True);
+ApplyStop(stopTypeProfit, stopModePoint, TakeProfit - EntryPrice, True);
+
+// Plot Buy Shape
+PlotShapes(IIf(Buy, shapeUpArrow, shapeNone), colorBrightGreen, 0, Low, -20);
+PlotShapes(IIf(Sell, shapeDownArrow, shapeNone), colorred, 0, High, -20);
+
+Filter = 1;
+AddColumn(EntryPrice, "EntryPrice");
+AddColumn(StopLoss, "StopLoss");
+AddColumn(TakeProfit, "TakeProfit");
+AddColumn(Buy, "Buy");
+AddColumn(Sell, "Sell");
+AddColumn(Close, "Close");
+AddColumn(isInPosition, "isInPosition");
+
+// Title to display strategy info
+//Title = EncodeColor(colorWhite) + "RSI(2) & Supertrend Strategy\n" +
+//        "Buy Price: " + WriteVal(EntryPrice, 1.2) + "\n" +
+//        "Stop Loss: " + WriteVal(StopLoss, 1.2) + "\n" + 
+//        "Take Profit: " + WriteVal(TakeProfit, 1.2) + "\n" +
+//        "Risk/Reward Ratio: 1:" + RiskRewardRatio;
